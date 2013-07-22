@@ -129,11 +129,6 @@ module Puma
         end
       end
 
-      # Invoke any worker boot hooks so they can get
-      # things in shape before booting the app.
-      hooks = @options[:worker_boot]
-      hooks.each { |h| h.call }
-
       server = start_server
 
       Signal.trap "SIGTERM" do
@@ -147,8 +142,12 @@ module Puma
         return
       end
 
-      server.run.join
+      # Invoke any worker boot hooks so they can get
+      # things in shape before booting the app.
+      hooks = @options[:worker_boot]
+      hooks.each { |h| h.call }
 
+      server.run.join
     ensure
       @worker_write.close
     end
