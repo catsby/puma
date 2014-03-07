@@ -392,32 +392,11 @@ module Puma
       end
 
       if jruby?
-        @binder.listeners.each_with_index do |(str,io),i|
-          io.close
-
-          # We have to unlink a unix socket path that's not being used
-          uri = URI.parse str
-          if uri.scheme == "unix"
-            path = "#{uri.host}#{uri.path}"
-            File.unlink path
-          end
-        end
-
+        unbind_listeners!
         require 'puma/jruby_restart'
         JRubyRestart.chdir_exec(@restart_dir, restart_args)
-
       elsif windows?
-        @binder.listeners.each_with_index do |(str,io),i|
-          io.close
-
-          # We have to unlink a unix socket path that's not being used
-          uri = URI.parse str
-          if uri.scheme == "unix"
-            path = "#{uri.host}#{uri.path}"
-            File.unlink path
-          end
-        end
-
+        unbind_listeners!
         argv = restart_args
 
         Dir.chdir @restart_dir
@@ -561,38 +540,53 @@ module Puma
       buffer
     end
 
+    # We have to unlink a unix socket path that's not being used
+    def unbind_listeners!
+      @binder.listeners.each_with_index do |(str,io),i|
+        io.close
+
+        uri = URI.parse str
+        if uri.scheme == "unix"
+          path = "#{uri.host}#{uri.path}"
+          File.unlink path
+        end
+      end
+    end
+
     def set_process_title
       Process.respond_to?(:setproctitle) ? Process.setproctitle(title) : $0 = title
     end
 
     def bundler_preflight
-      if prune_bundler? && defined?(Bundler)
-        puma = Bundler.rubygems.loaded_specs("puma")
+      return unless prune_bundler? && defined?(Bundler)
+      puma = Bundler.rubygems.loaded_specs("puma")
 
-        dirs = puma.require_paths.map { |x| File.join(puma.full_gem_path, x) }
+      dirs = puma.require_paths.map { |x| File.join(puma.full_gem_path, x) }
 
-        puma_lib_dir = dirs.detect { |x| File.exist? File.join(x, "../bin/puma-wild") }
+      puma_lib_dir = dirs.detect { |x| File.exist? File.join(x, "../bin/puma-wild") }
 
-        deps = puma.runtime_dependencies.map { |d|
-          spec = Bundler.rubygems.loaded_specs(d.name)
-          "#{d.name}:#{spec.version.to_s}"
-        }.join(",")
+      deps = puma.runtime_dependencies.map { |d|
+        spec = Bundler.rubygems.loaded_specs(d.name)
+        "#{d.name}:#{spec.version.to_s}"
+      }.join(",")
 
-        if puma_lib_dir
-          log "* Pruning Bundler environment"
-          Bundler.with_clean_env do
+      clean_dirs!(puma_lib_dir, deps) if puma_lib_dir
 
-            wild = File.expand_path(File.join(puma_lib_dir, "../bin/puma-wild"))
+      log "! Unable to prune Bundler environment, continuing"
+    end
 
-            args = [Gem.ruby] + dirs.map { |x| ["-I", x] }.flatten +
-                   [wild, deps] + @original_argv
+    def clean_dirs!(lib_dir, deps)
+      log "* Pruning Bundler environment"
+      Bundler.with_clean_env do
 
-            Kernel.exec(*args)
-          end
-        end
+        wild = File.expand_path(File.join(lib_dir, "../bin/puma-wild"))
 
-        log "! Unable to prune Bundler environment, continuing"
+        args = [Gem.ruby] + dirs.map { |x| ["-I", x] }.flatten +
+               [wild, deps] + @original_argv
+
+        Kernel.exec(*args)
       end
     end
   end
+
 end
