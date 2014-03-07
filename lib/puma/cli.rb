@@ -455,33 +455,7 @@ module Puma
         exit 1
       end
 
-      if prune_bundler? && defined?(Bundler)
-        puma = Bundler.rubygems.loaded_specs("puma")
-
-        dirs = puma.require_paths.map { |x| File.join(puma.full_gem_path, x) }
-
-        puma_lib_dir = dirs.detect { |x| File.exist? File.join(x, "../bin/puma-wild") }
-
-        deps = puma.runtime_dependencies.map { |d|
-          spec = Bundler.rubygems.loaded_specs(d.name)
-          "#{d.name}:#{spec.version.to_s}"
-        }.join(",")
-
-        if puma_lib_dir
-          log "* Pruning Bundler environment"
-          Bundler.with_clean_env do
-
-            wild = File.expand_path(File.join(puma_lib_dir, "../bin/puma-wild"))
-
-            args = [Gem.ruby] + dirs.map { |x| ["-I", x] }.flatten +
-                   [wild, deps] + @original_argv
-
-            Kernel.exec(*args)
-          end
-        end
-
-        log "! Unable to prune Bundler environment, continuing"
-      end
+      bundler_preflight
 
       if dir = @options[:directory]
         Dir.chdir dir
@@ -589,6 +563,36 @@ module Puma
 
     def set_process_title
       Process.respond_to?(:setproctitle) ? Process.setproctitle(title) : $0 = title
+    end
+
+    def bundler_preflight
+      if prune_bundler? && defined?(Bundler)
+        puma = Bundler.rubygems.loaded_specs("puma")
+
+        dirs = puma.require_paths.map { |x| File.join(puma.full_gem_path, x) }
+
+        puma_lib_dir = dirs.detect { |x| File.exist? File.join(x, "../bin/puma-wild") }
+
+        deps = puma.runtime_dependencies.map { |d|
+          spec = Bundler.rubygems.loaded_specs(d.name)
+          "#{d.name}:#{spec.version.to_s}"
+        }.join(",")
+
+        if puma_lib_dir
+          log "* Pruning Bundler environment"
+          Bundler.with_clean_env do
+
+            wild = File.expand_path(File.join(puma_lib_dir, "../bin/puma-wild"))
+
+            args = [Gem.ruby] + dirs.map { |x| ["-I", x] }.flatten +
+                   [wild, deps] + @original_argv
+
+            Kernel.exec(*args)
+          end
+        end
+
+        log "! Unable to prune Bundler environment, continuing"
+      end
     end
   end
 end
